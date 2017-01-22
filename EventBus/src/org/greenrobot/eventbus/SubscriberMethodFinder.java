@@ -52,22 +52,30 @@ class SubscriberMethodFinder {
         this.ignoreGeneratedIndex = ignoreGeneratedIndex;
     }
 
+    /**
+     * 找到订阅方法
+     *
+     * @param subscriberClass
+     * @return
+     */
     List<SubscriberMethod> findSubscriberMethods(Class<?> subscriberClass) {
         List<SubscriberMethod> subscriberMethods = METHOD_CACHE.get(subscriberClass);
         if (subscriberMethods != null) {
             return subscriberMethods;
         }
-
+        //是否忽略注解器生成的MyEventBusIndex，默认是false
         if (ignoreGeneratedIndex) {
             subscriberMethods = findUsingReflection(subscriberClass);
         } else {
+            //通过注解器生成的MyEventBusIndex信息获取subscriberMethods,
+            //如果没有配置MyEventBusIndex，依然通过通过反射获取subscriberMethods
             subscriberMethods = findUsingInfo(subscriberClass);
         }
         if (subscriberMethods.isEmpty()) {
             throw new EventBusException("Subscriber " + subscriberClass
                     + " and its super classes have no public methods with the @Subscribe annotation");
         } else {
-            METHOD_CACHE.put(subscriberClass, subscriberMethods);
+            METHOD_CACHE.put(subscriberClass, subscriberMethods);// 缓存
             return subscriberMethods;
         }
     }
@@ -85,6 +93,7 @@ class SubscriberMethodFinder {
                     }
                 }
             } else {
+                //一般走这里
                 findUsingReflectionInSingleClass(findState);
             }
             findState.moveToSuperclass();
@@ -92,7 +101,14 @@ class SubscriberMethodFinder {
         return getMethodsAndRelease(findState);
     }
 
+    /**
+     * 得到方法集合，并释放资源
+     *
+     * @param findState
+     * @return
+     */
     private List<SubscriberMethod> getMethodsAndRelease(FindState findState) {
+        // 重新构造一个方法集合，释放FindState回对象池
         List<SubscriberMethod> subscriberMethods = new ArrayList<>(findState.subscriberMethods);
         findState.recycle();
         synchronized (FIND_STATE_POOL) {
@@ -158,14 +174,14 @@ class SubscriberMethodFinder {
             findState.skipSuperClasses = true;
         }
         for (Method method : methods) {
-            int modifiers = method.getModifiers();
-            if ((modifiers & Modifier.PUBLIC) != 0 && (modifiers & MODIFIERS_IGNORE) == 0) {
+            int modifiers = method.getModifiers();// 获取修饰符
+            if ((modifiers & Modifier.PUBLIC) != 0 && (modifiers & MODIFIERS_IGNORE) == 0) {// 必须是public，且不能是MODIFIERS_IGNORE这几种
                 Class<?>[] parameterTypes = method.getParameterTypes();
-                if (parameterTypes.length == 1) {
+                if (parameterTypes.length == 1) {// 必须只有一个参数
                     Subscribe subscribeAnnotation = method.getAnnotation(Subscribe.class);
-                    if (subscribeAnnotation != null) {
+                    if (subscribeAnnotation != null) {// 有@Subscribe注解的方法
                         Class<?> eventType = parameterTypes[0];
-                        if (findState.checkAdd(method, eventType)) {
+                        if (findState.checkAdd(method, eventType)) {// 检查，防止重复添加
                             ThreadMode threadMode = subscribeAnnotation.threadMode();
                             findState.subscriberMethods.add(new SubscriberMethod(method, eventType, threadMode,
                                     subscribeAnnotation.priority(), subscribeAnnotation.sticky()));
@@ -190,7 +206,13 @@ class SubscriberMethodFinder {
 
     static class FindState {
         final List<SubscriberMethod> subscriberMethods = new ArrayList<>();
+        /**
+         * 某一事件类型所对应的方法
+         */
         final Map<Class, Object> anyMethodByEventType = new HashMap<>();
+        /**
+         * 方法名称以及参数类型所生成的key和声明了该方法的class
+         */
         final Map<String, Class> subscriberClassByMethodKey = new HashMap<>();
         final StringBuilder methodKeyBuilder = new StringBuilder(128);
 
@@ -216,6 +238,13 @@ class SubscriberMethodFinder {
             subscriberInfo = null;
         }
 
+        /**
+         * 检查
+         *
+         * @param method    方法
+         * @param eventType 该方法接收事件的参数类型
+         * @return 是否通过验证
+         */
         boolean checkAdd(Method method, Class<?> eventType) {
             // 2 level check: 1st level with event type only (fast), 2nd level with complete signature when required.
             // Usually a subscriber doesn't have methods listening to the same event type.
@@ -241,13 +270,15 @@ class SubscriberMethodFinder {
             methodKeyBuilder.append('>').append(eventType.getName());
 
             String methodKey = methodKeyBuilder.toString();
-            Class<?> methodClass = method.getDeclaringClass();
+            Class<?> methodClass = method.getDeclaringClass();// 得到声明此方法的类
             Class<?> methodClassOld = subscriberClassByMethodKey.put(methodKey, methodClass);
             if (methodClassOld == null || methodClassOld.isAssignableFrom(methodClass)) {
                 // Only add if not already found in a sub class
+                // 只有  没在子类中找到的情况下才可以添加
                 return true;
             } else {
                 // Revert the put, old class is further down the class hierarchy
+                // 新值不是旧值的子类，则恢复之前的key-value。。。。why？
                 subscriberClassByMethodKey.put(methodKey, methodClassOld);
                 return false;
             }
@@ -259,7 +290,7 @@ class SubscriberMethodFinder {
             } else {
                 clazz = clazz.getSuperclass();
                 String clazzName = clazz.getName();
-                /** Skip system classes, this just degrades performance. */
+                /** Skip system classes, this just degrades performance.忽略系统的类 */
                 if (clazzName.startsWith("java.") || clazzName.startsWith("javax.") || clazzName.startsWith("android.")) {
                     clazz = null;
                 }
